@@ -51,7 +51,7 @@ AgentSmith/
 
 ### Prerequisites
 - Python 3.12+
-- [Ollama](https://ollama.ai/) with gemma2:latest model
+- [Ollama](https://ollama.ai/) with gemma3n:latest model
 - Sufficient RAM (4GB+ recommended)
 
 ### Setup Steps
@@ -70,7 +70,7 @@ AgentSmith/
 3. **Install Ollama & Model**
    ```bash
    # Install Ollama (visit https://ollama.ai/ for instructions)
-   ollama pull gemma2:latest
+   ollama pull gemma3n:latest
    ```
 
 4. **Verify Installation**
@@ -154,7 +154,7 @@ All security events are logged with:
 
 ### Environment Variables
 ```bash
-export AGENT_SMITH_MODEL="gemma2:latest"
+export AGENT_SMITH_MODEL="gemma3n:latest"
 export AGENT_SMITH_SAFETY_MODE="true"
 export AGENT_SMITH_MAX_EXECUTION_TIME="300"
 ```
@@ -178,7 +178,7 @@ export AGENT_SMITH_MAX_EXECUTION_TIME="300"
 ### Known Limitations
 - Requires Ollama service running locally
 - Resource intensive for complex task decomposition
-- Limited to capabilities of underlying gemma2 model
+- Limited to capabilities of underlying gemma3n model
 - Security depends on proper system configuration
 
 ## 🤝 Contributing

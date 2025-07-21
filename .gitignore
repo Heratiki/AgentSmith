@@ -72,3 +72,7 @@ Desktop.ini
 # Ignore secrets
 secrets.*
 CLAUDE.md
+agent_smith.db-shm
+agent_smith.db-wal
+weather_data.txt
+test_sandbox.py

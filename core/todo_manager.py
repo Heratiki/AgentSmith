@@ -195,7 +195,7 @@ class TodoManager:
         
         try:
             response = self.client.chat(
-                model="gemma2:latest",
+                model="gemma3n:latest",
                 messages=[
                     {"role": "system", "content": "You are Agent Smith. Create precise, logical task breakdowns."},
                     {"role": "user", "content": breakdown_prompt}

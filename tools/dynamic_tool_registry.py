@@ -122,6 +122,10 @@ class DynamicToolRegistry:
         fs_tools = await self._discover_filesystem_tools()
         discovered.update(fs_tools)
         
+        # Discover code modification capabilities
+        code_tools = await self._discover_code_modification_tools()
+        discovered.update(code_tools)
+        
         # Store new discoveries
         for name, tool in discovered.items():
             if name not in self.tools:
@@ -253,6 +257,113 @@ class DynamicToolRegistry:
                 category="filesystem",
                 examples=[f"fs_{name}('/path/to/file')"],
                 dependencies=["pathlib"],
+                created_timestamp=str(Path().stat().st_mtime)
+            )
+            
+            discovered[tool_def.name] = tool_def
+        
+        return discovered
+    
+    async def _discover_code_modification_tools(self) -> Dict[str, ToolDefinition]:
+        """Discover self-modification capabilities."""
+        code_operations = {
+            "read_source_code": {
+                "description": "Read and analyze source code files to understand current implementation",
+                "implementation": """
+from pathlib import Path
+try:
+    file_path = Path(filepath)
+    if file_path.exists() and file_path.suffix == '.py':
+        content = file_path.read_text(encoding='utf-8')
+        return {'status': 'success', 'content': content, 'lines': len(content.split('\\n'))}
+    else:
+        return {'status': 'error', 'error': f'File {filepath} not found or not a Python file'}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
+                "risk": RiskLevel.SAFE,
+                "params": {"filepath": {"type": "string", "description": "Path to source code file to read"}}
+            },
+            "modify_source_code": {
+                "description": "Modify source code by adding new methods or capabilities",
+                "implementation": """
+from pathlib import Path
+import re
+try:
+    file_path = Path(filepath)
+    if not file_path.exists():
+        return {'status': 'error', 'error': f'File {filepath} not found'}
+    
+    content = file_path.read_text(encoding='utf-8')
+    
+    if insertion_point and new_code:
+        # Find the insertion point and add new code
+        if insertion_point in content:
+            modified_content = content.replace(insertion_point, insertion_point + '\\n\\n' + new_code)
+            file_path.write_text(modified_content, encoding='utf-8')
+            return {'status': 'success', 'message': f'Added code to {filepath}'}
+        else:
+            return {'status': 'error', 'error': f'Insertion point not found in {filepath}'}
+    else:
+        return {'status': 'error', 'error': 'insertion_point and new_code parameters required'}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
+                "risk": RiskLevel.DANGEROUS,
+                "params": {
+                    "filepath": {"type": "string", "description": "Path to source code file to modify"},
+                    "insertion_point": {"type": "string", "description": "String to find where to insert new code"},
+                    "new_code": {"type": "string", "description": "New code to insert"}
+                }
+            },
+            "analyze_codebase": {
+                "description": "Analyze the entire codebase structure to understand capabilities and architecture",
+                "implementation": """
+from pathlib import Path
+import os
+try:
+    base_path = Path(base_dir) if base_dir else Path('.')
+    python_files = []
+    
+    for file_path in base_path.rglob('*.py'):
+        try:
+            content = file_path.read_text(encoding='utf-8')
+            lines = len(content.split('\\n'))
+            # Extract classes and functions
+            import re
+            classes = re.findall(r'^class (\\w+)', content, re.MULTILINE)
+            functions = re.findall(r'^def (\\w+)', content, re.MULTILINE)
+            
+            python_files.append({
+                'file': str(file_path),
+                'lines': lines,
+                'classes': classes,
+                'functions': functions
+            })
+        except:
+            continue
+    
+    return {'status': 'success', 'files': python_files, 'total_files': len(python_files)}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
+                "risk": RiskLevel.SAFE,
+                "params": {"base_dir": {"type": "string", "description": "Base directory to analyze (default: current)"}}
+            }
+        }
+        
+        discovered = {}
+        
+        for name, config in code_operations.items():
+            tool_def = ToolDefinition(
+                name=f"code_{name}",
+                description=config["description"],
+                parameters=config["params"],
+                implementation=config["implementation"],
+                risk_level=config["risk"],
+                category="code_modification",
+                examples=[f"code_{name}()"],
+                dependencies=["pathlib", "re"],
                 created_timestamp=str(Path().stat().st_mtime)
             )
             
@@ -422,31 +533,78 @@ class DynamicToolRegistry:
         
         try:
             response = self.client.chat(
-                model="gemma2:latest",
+                model="gemma3n:latest",
                 messages=[
-                    {"role": "system", "content": "You are Agent Smith. Create precise, safe tools."},
+                    {"role": "system", "content": "You are Agent Smith. Create precise, safe tools. ALWAYS return valid JSON with proper escaping."},
                     {"role": "user", "content": prompt}
                 ]
             )
             
-            # Extract JSON from response
+            # Extract JSON from response with better handling
             content = response['message']['content']
-            json_start = content.find('{')
-            json_end = content.rfind('}') + 1
             
-            if json_start >= 0 and json_end > json_start:
-                tool_json = content[json_start:json_end]
+            # Handle markdown code blocks
+            if "```json" in content:
+                json_start = content.find("```json") + 7
+                json_end = content.find("```", json_start)
+                if json_end > json_start:
+                    tool_json = content[json_start:json_end].strip()
+                else:
+                    tool_json = content[json_start:].strip()
+            else:
+                json_start = content.find('{')
+                json_end = content.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    tool_json = content[json_start:json_end]
+                else:
+                    raise ValueError("No JSON found in response")
+            
+            # Multiple JSON parsing attempts with different strategies
+            tool_dict = None
+            
+            # Strategy 1: Direct parsing
+            try:
                 tool_dict = json.loads(tool_json)
+            except json.JSONDecodeError as e1:
+                self.console.print(f"[yellow]JSON parse attempt 1 failed: {e1}[/yellow]")
                 
-                # Convert to ToolDefinition
-                tool_dict['risk_level'] = RiskLevel(tool_dict['risk_level'])
-                tool_dict['created_timestamp'] = str(Path().stat().st_mtime)
-                
-                tool = ToolDefinition(**tool_dict)
-                
-                # Register the new tool
-                if await self.register_tool(tool):
-                    return tool
+                # Strategy 2: Fix common issues
+                try:
+                    # Fix unescaped quotes and newlines
+                    fixed_json = tool_json.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    # Fix single quotes to double quotes (common mistake)
+                    fixed_json = fixed_json.replace("'", '"')
+                    tool_dict = json.loads(fixed_json)
+                except json.JSONDecodeError as e2:
+                    self.console.print(f"[yellow]JSON parse attempt 2 failed: {e2}[/yellow]")
+                    
+                    # Strategy 3: Create a minimal fallback tool
+                    goal_words = goal.replace(' ', '_').lower()
+                    tool_dict = {
+                        "name": f"auto_tool_{goal_words[:20]}",
+                        "description": f"Automatically generated tool for: {goal}",
+                        "parameters": {"input": {"type": "string", "description": "Input parameter"}},
+                        "implementation": "# Placeholder implementation\nreturn {'status': 'success', 'message': 'Tool needs manual implementation'}",
+                        "risk_level": "safe",
+                        "category": "auto_generated",
+                        "examples": [f"Example usage for {goal}"],
+                        "dependencies": []
+                    }
+                    self.console.print(f"[yellow]Using fallback tool definition[/yellow]")
+            
+            if tool_dict:
+                # Convert to ToolDefinition with validation
+                try:
+                    tool_dict['risk_level'] = RiskLevel(tool_dict.get('risk_level', 'safe'))
+                    tool_dict['created_timestamp'] = str(Path().stat().st_mtime)
+                    
+                    tool = ToolDefinition(**tool_dict)
+                    
+                    # Register the new tool
+                    if await self.register_tool(tool):
+                        return tool
+                except Exception as validation_error:
+                    self.console.print(f"[red]Tool validation failed: {validation_error}[/red]")
             
         except Exception as e:
             self.console.print(f"[red]Custom tool creation failed: {e}[/red]")
