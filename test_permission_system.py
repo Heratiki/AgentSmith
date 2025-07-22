@@ -6,6 +6,7 @@ Test the new permission-based security system
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 
 # Add the project root to Python path
 project_root = Path(__file__).parent
@@ -13,6 +14,7 @@ sys.path.insert(0, str(project_root))
 
 from agent_smith import AgentSmith
 
+@pytest.mark.asyncio
 async def test_permission():
     agent = AgentSmith()
     

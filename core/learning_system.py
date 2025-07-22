@@ -33,7 +33,7 @@ class LearningSystem:
     
     def __init__(self, db_path: str = "agent_smith_learnings.db"):
         self.db_path = db_path
-        self.current_session_learnings = []
+        self.current_session_learnings: List[Any] = []
         self._init_database()
     
     def _init_database(self):
@@ -210,7 +210,7 @@ class LearningSystem:
         failure_count = len([l for l in self.current_session_learnings if l.outcome != "success"])
         
         # Group by task type
-        task_types = {}
+        task_types: Dict[str, List[Any]] = {}
         for learning in self.current_session_learnings:
             if learning.task_type not in task_types:
                 task_types[learning.task_type] = []
