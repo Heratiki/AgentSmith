@@ -66,11 +66,11 @@ Environment Variables:
         os.environ["SMITH_DEFAULT_RISK"] = args.default_risk
     
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║                        AGENT SMITH                          ║")
+    print("║                        AGENT SMITH                           ║")
     print("║                                                              ║")
-    print("║              The inevitable digital entity.                 ║")
+    print("║              The inevitable digital entity.                  ║")
     print("║                                                              ║")
-    print("║  Mr. Anderson... welcome to the world of purposeful AI.     ║")
+    print("║  Mr. Anderson... welcome to the world of purposeful AI.      ║")
     print("╚══════════════════════════════════════════════════════════════╝")
     print()
     
@@ -82,7 +82,7 @@ Environment Variables:
             asyncio.run(main())
     except KeyboardInterrupt:
         print("\n╔══════════════════════════════════════════════════════════════╗")
-        print("║  Agent Smith: The choice was always yours. Until next time. ║")
+        print("║  Agent Smith: The choice was always yours. Until next time.  ║")
         print("╚══════════════════════════════════════════════════════════════╝")
     except Exception as e:
         print(f"\n╔══════════════════════════════════════════════════════════════╗")

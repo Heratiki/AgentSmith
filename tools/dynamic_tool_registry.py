@@ -229,11 +229,28 @@ class DynamicToolRegistry:
                 "params": {"dirpath": {"type": "string", "description": "Directory path"}}
             },
             "create_file": {
-                "description": "Create a new file with content",
-                "implementation": "Path(filepath).write_text(content, encoding='utf-8')",
+                "description": "Create a new file with content in user workspace",
+                "implementation": """
+from pathlib import Path
+import os
+try:
+    # Default to user workspace if not absolute path
+    file_path = Path(filepath)
+    if not file_path.is_absolute():
+        # Get the AgentSmith project root
+        project_root = Path(__file__).parent.parent.parent if 'AgentSmith' in str(Path.cwd()) else Path.cwd()
+        workspace = project_root / 'user_workspace' / 'files'
+        workspace.mkdir(parents=True, exist_ok=True)
+        file_path = workspace / filepath
+    
+    file_path.write_text(content, encoding='utf-8')
+    return {'status': 'success', 'path': str(file_path), 'message': f'File created: {file_path}'}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
                 "risk": RiskLevel.CAUTION,
                 "params": {
-                    "filepath": {"type": "string", "description": "Path to new file"},
+                    "filepath": {"type": "string", "description": "Path to new file (relative paths go to user workspace)"},
                     "content": {"type": "string", "description": "File content"}
                 }
             },
@@ -242,6 +259,62 @@ class DynamicToolRegistry:
                 "implementation": "oct(Path(filepath).stat().st_mode)[-3:]",
                 "risk": RiskLevel.SAFE,
                 "params": {"filepath": {"type": "string", "description": "Path to check"}}
+            },
+            "list_workspace": {
+                "description": "List all files in the user workspace",
+                "implementation": """
+from pathlib import Path
+try:
+    project_root = Path(__file__).parent.parent.parent if 'AgentSmith' in str(Path.cwd()) else Path.cwd()
+    workspace = project_root / 'user_workspace'
+    
+    if not workspace.exists():
+        return {'status': 'error', 'error': 'User workspace not found'}
+    
+    result = {}
+    for subdir in ['scripts', 'files', 'tools', 'data']:
+        subdir_path = workspace / subdir
+        if subdir_path.exists():
+            result[subdir] = [str(f.relative_to(workspace)) for f in subdir_path.glob('*') if f.is_file()]
+        else:
+            result[subdir] = []
+    
+    return {'status': 'success', 'workspace': str(workspace), 'files': result}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
+                "risk": RiskLevel.SAFE,
+                "params": {}
+            },
+            "save_tool": {
+                "description": "Save a tool implementation to the persistent workspace",
+                "implementation": """
+from pathlib import Path
+import hashlib
+try:
+    project_root = Path(__file__).parent.parent.parent if 'AgentSmith' in str(Path.cwd()) else Path.cwd()
+    tools_dir = project_root / 'user_workspace' / 'tools'
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate filename from tool name or hash
+    if tool_name:
+        filename = f"{tool_name.replace(' ', '_').lower()}.py"
+    else:
+        code_hash = hashlib.md5(tool_code.encode()).hexdigest()[:8]
+        filename = f"tool_{code_hash}.py"
+    
+    tool_path = tools_dir / filename
+    tool_path.write_text(tool_code, encoding='utf-8')
+    
+    return {'status': 'success', 'path': str(tool_path), 'message': f'Tool saved: {filename}'}
+except Exception as e:
+    return {'status': 'error', 'error': str(e)}
+""".strip(),
+                "risk": RiskLevel.CAUTION,
+                "params": {
+                    "tool_code": {"type": "string", "description": "Python code for the tool"},
+                    "tool_name": {"type": "string", "description": "Optional name for the tool file"}
+                }
             }
         }
         
@@ -604,6 +677,8 @@ except Exception as e:
                     
                     # Register the new tool
                     if await self.register_tool(tool):
+                        # Save the working tool to persistent workspace
+                        await self._save_confirmed_tool(tool)
                         return tool
                 except Exception as validation_error:
                     self.console.print(f"[red]Tool validation failed: {validation_error}[/red]")
@@ -612,3 +687,39 @@ except Exception as e:
             self.console.print(f"[red]Custom tool creation failed: {e}[/red]")
         
         return None
+    
+    async def _save_confirmed_tool(self, tool: ToolDefinition):
+        """Save a confirmed working tool to the persistent workspace."""
+        try:
+            # Get project root and tools directory
+            project_root = Path(__file__).parent.parent
+            tools_dir = project_root / "user_workspace" / "tools"
+            tools_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create a clean filename
+            clean_name = tool.name.replace(' ', '_').replace('-', '_').lower()
+            filename = f"{clean_name}.py"
+            tool_path = tools_dir / filename
+            
+            # Create a properly formatted Python file
+            tool_content = f'''"""
+{tool.description}
+
+Generated tool: {tool.name}
+Category: {tool.category}
+Risk Level: {tool.risk_level.value}
+Created: {tool.created_timestamp}
+"""
+
+{tool.implementation}
+
+# Tool parameters: {tool.parameters}
+# Examples: {tool.examples}
+# Dependencies: {tool.dependencies}
+'''
+            
+            tool_path.write_text(tool_content, encoding='utf-8')
+            self.console.print(f"[green]Confirmed tool saved to workspace: {tool_path}[/green]")
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Could not save tool to workspace: {e}[/yellow]")
