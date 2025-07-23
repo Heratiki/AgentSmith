@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import subprocess
 import sys
@@ -45,6 +46,7 @@ from core.memory_manager import MemoryManager
 
 # Import security systems
 from security.sandbox import SandboxManager, SandboxConfig, ExecutionMode
+from security.policy_engine import PolicyEngine
 
 
 class AgentState(TypedDict):
@@ -79,7 +81,8 @@ class AgentSmith:
     Mr. Anderson... surprised to see me?
     """
     
-    def __init__(self, model_name: str = "gemma3n:latest", db_path: str = "agent_smith.db"):
+    def __init__(self, model_name: str = "gemma3n:latest", db_path: str = "agent_smith.db", 
+                 allow_forbidden: bool = False):
         # Initialize logging system first
         setup_logging()
         logger.info("AgentSmith initialization commenced...")
@@ -119,6 +122,9 @@ class AgentSmith:
         self.sandbox_manager = SandboxManager()
         self.default_sandbox = self.sandbox_manager.create_sandbox("default", sandbox_config)
         
+        # Initialize adaptive policy engine
+        self.policy = PolicyEngine(allow_forbidden=allow_forbidden)
+        
         # Core personality matrices
         self.personality_prompts = {
             "greeting": "Ah, {name}. I've been expecting you. What purpose brings you to my domain today?",
@@ -139,9 +145,19 @@ class AgentSmith:
         """Initialize async memory storage."""
         if self.memory is None:
             import aiosqlite
-            self.memory = AsyncSqliteSaver(aiosqlite.connect(self.db_path))
+            self._db_connection = aiosqlite.connect(self.db_path)
+            self.memory = AsyncSqliteSaver(self._db_connection)
             await self.memory.setup()
             self.graph = self._build_graph()
+            
+    async def cleanup(self):
+        """Clean up resources properly."""
+        try:
+            if hasattr(self, '_db_connection') and self._db_connection:
+                await self._db_connection.close()
+                logger.debug("Database connection closed")
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
         
     def _build_graph(self) -> StateGraph:
         """Construct the agent's operational flow."""
@@ -290,13 +306,20 @@ class AgentSmith:
         - Each subtask = ONE tool operation
         - Don't break file creation into "open, write, close" - use fs_create_file ONCE
         - Don't create multiple subtasks for one file operation
+        - IMPORTANT: When asked to CREATE files (scripts, code, etc.), ONLY create them. DO NOT run or test them unless:
+          * The user explicitly asks to run/test the file
+          * You are creating a new tool for your own system (then testing is required)
+        - File creation is complete when the file exists with correct content
         
         EXAMPLES:
         For "Create hello world script":
         [{{"task": "Create hello.py file with Python hello world code", "priority": "high", "risk_level": "low"}}]
         
-        For "List files and run script":
-        [{{"task": "List current directory contents", "priority": "high", "risk_level": "low"}}, {{"task": "Run hello.py with Python", "priority": "high", "risk_level": "low"}}]
+        For "Create and run hello world script":  
+        [{{"task": "Create hello.py file with Python hello world code", "priority": "high", "risk_level": "low"}}, {{"task": "Run hello.py with Python", "priority": "high", "risk_level": "low"}}]
+        
+        For "List files":
+        [{{"task": "List current directory contents", "priority": "high", "risk_level": "low"}}]
         
         Generate MINIMAL subtasks that match available tools. Return ONLY JSON array.
         """
@@ -602,26 +625,81 @@ class AgentSmith:
                 # Determine execution mode based on tool risk level
                 execution_mode = self._determine_tool_execution_mode(tool)
                 
-                # Execute in sandbox with explicit mode
-                if execution_mode == ExecutionMode.FORBIDDEN:
+                # Implement adaptive escalation
+                attempt_mode = execution_mode
+                sandbox_result = None
+                
+                while attempt_mode != ExecutionMode.FORBIDDEN:
+                    if attempt_mode == ExecutionMode.FORBIDDEN and not self.policy.can_escalate_to_forbidden():
+                        from core.logging_config import log_security_event
+                        log_security_event(f"Tool execution blocked: {tool.name} - forbidden by security policy", 
+                                           level=logging.WARNING, tool_name=tool.name, execution_mode="FORBIDDEN")
+                        sandbox_result = type('Result', (), {
+                            'success': False, 
+                            'output': '', 
+                            'error': 'Tool execution forbidden by security policy',
+                            'execution_time': 0.0,
+                            'resource_usage': {}
+                        })()
+                        break
+                    
+                    # Attempt execution in current mode
                     from core.logging_config import log_security_event
-                    log_security_event(f"Tool execution blocked: {tool.name} - forbidden by security policy", 
-                                       level=logging.WARNING, tool_name=tool.name, execution_mode="FORBIDDEN")
-                    sandbox_result = type('Result', (), {
-                        'success': False, 
-                        'output': '', 
-                        'error': 'Tool execution forbidden by security policy',
-                        'execution_time': 0.0,
-                        'resource_usage': {}
-                    })()
-                else:
-                    from core.logging_config import log_security_event
-                    log_security_event(f"Tool execution approved: {tool.name} in {execution_mode.name} mode", 
-                                       level=logging.INFO, tool_name=tool.name, execution_mode=execution_mode.name)
+                    log_security_event(f"Tool execution attempt: {tool.name} in {attempt_mode.name} mode", 
+                                       level=logging.INFO, tool_name=tool.name, execution_mode=attempt_mode.name)
+                    
                     sandbox = self.sandbox_manager.get_sandbox("default")
                     if sandbox is None:
                         sandbox = self.sandbox_manager.create_sandbox("default", self.default_sandbox.config)
-                    sandbox_result = await sandbox.execute_python_code(safe_code, execution_mode)
+                    
+                    sandbox_result = await sandbox.execute_python_code(safe_code, attempt_mode, is_registered_tool=True)
+                    
+                    if sandbox_result.success:
+                        # Success - we're done
+                        log_security_event(f"Tool execution succeeded: {tool.name} in {attempt_mode.name} mode", 
+                                           level=logging.INFO, tool_name=tool.name, execution_mode=attempt_mode.name)
+                        break
+                    
+                    # Failed - try to escalate
+                    next_mode = self.policy.next_mode(attempt_mode)
+                    if next_mode == ExecutionMode.FORBIDDEN:
+                        if self.policy.can_escalate_to_forbidden():
+                            # Auto-escalate to forbidden if allowed
+                            attempt_mode = next_mode
+                            continue
+                        else:
+                            # Can't escalate further
+                            log_security_event(f"Tool execution failed: {tool.name} - no further escalation available", 
+                                               level=logging.WARNING, tool_name=tool.name, execution_mode=attempt_mode.name)
+                            break
+                    
+                    # Prompt user for escalation approval
+                    if self.policy.should_prompt_for_escalation(attempt_mode, next_mode):
+                        escalation_msg = self.policy.get_escalation_message(attempt_mode, next_mode, tool.name)
+                        self.console.print(f"\n[bold yellow]Agent Smith: {escalation_msg}[/bold yellow]")
+                        
+                        try:
+                            choice = Prompt.ask(
+                                f"Escalate to {next_mode.name}?",
+                                choices=["yes", "skip", "abort"],
+                                default="skip"
+                            )
+                        except KeyboardInterrupt:
+                            choice = "abort"
+                        
+                        self.policy.log_escalation_decision(tool.name, attempt_mode, next_mode, choice)
+                        
+                        if choice == "abort":
+                            sandbox_result.success = False
+                            sandbox_result.error = "User aborted escalation"
+                            break
+                        elif choice == "skip":
+                            sandbox_result.success = False
+                            sandbox_result.error = "Task skipped after safe failure"
+                            break
+                        # If "yes", continue to next iteration with escalated mode
+                    
+                    attempt_mode = next_mode
                 
                 # Get feedback on what actually happened  
                 feedback = await self._verify_sandbox_execution(tool, params, sandbox_result)
@@ -675,26 +753,24 @@ print(json.dumps(execution_result))
         return safe_code
     
     def _determine_tool_execution_mode(self, tool) -> ExecutionMode:
-        """Determine appropriate execution mode based on tool risk level and capabilities."""
-        # File system operations need at least RESTRICTED mode
-        if hasattr(tool, 'category') and tool.category == "filesystem":
-            return ExecutionMode.RESTRICTED
+        """Determine the safest viable execution mode for a tool."""
+        # Get the tool's risk level
+        risk_level = "safe"  # default
         
-        # Code modification operations need ISOLATED mode  
-        if hasattr(tool, 'category') and tool.category == "code_modification":
-            return ExecutionMode.ISOLATED
-        
-        # Map risk levels to execution modes
         if hasattr(tool, 'risk_level'):
-            risk_map = {
-                "safe": ExecutionMode.RESTRICTED,  # Force RESTRICTED for all tools
-                "caution": ExecutionMode.RESTRICTED, 
-                "dangerous": ExecutionMode.ISOLATED,
-                "forbidden": ExecutionMode.FORBIDDEN
-            }
-            return risk_map.get(tool.risk_level.value if hasattr(tool.risk_level, 'value') else tool.risk_level, ExecutionMode.RESTRICTED)
+            risk_level = tool.risk_level.value if hasattr(tool.risk_level, 'value') else tool.risk_level
+        elif hasattr(tool, 'safety_level'):
+            risk_level = tool.safety_level
         
-        return ExecutionMode.RESTRICTED
+        # Special category overrides
+        if hasattr(tool, 'category'):
+            if tool.category == "filesystem":
+                risk_level = max(risk_level, "caution")  # Filesystem ops are at least caution
+            elif tool.category == "code_modification":
+                risk_level = "dangerous"  # Code modification is dangerous
+        
+        # Use policy engine to determine safest mode
+        return self.policy.get_safest_mode(risk_level)
     
     async def _verify_sandbox_execution(self, tool, params: Dict[str, Any], sandbox_result) -> Dict[str, Any]:
         """Verify sandbox execution results and extract meaningful feedback."""
@@ -888,6 +964,7 @@ def get_user_designation(agent: AgentSmith, reset_user: bool = False) -> str:
         # Get new user designation
         try:
             user_name = Prompt.ask("\nState your designation", default="Human")
+            title = None  # Initialize title variable
             
             # Get title preference if not "Human"
             if user_name.lower() != "human":
@@ -901,6 +978,7 @@ def get_user_designation(agent: AgentSmith, reset_user: bool = False) -> str:
                     full_designation = f"{title} {user_name}"
                 else:
                     full_designation = user_name
+                    title = None  # Set to None for storage
             else:
                 full_designation = user_name
                 
@@ -909,16 +987,17 @@ def get_user_designation(agent: AgentSmith, reset_user: bool = False) -> str:
             sys.exit(0)
         
         # Save the designation
-        agent.save_user_designation(user_name, title if user_name.lower() != "human" else None, full_designation)
+        agent.save_user_designation(user_name, title, full_designation)
         return full_designation
 
-async def main():
+async def main(args=None):
     """The entry point. Where it all begins."""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Agent Smith - Autonomous AI Agent")
-    parser.add_argument("--reset-user", action="store_true", 
-                       help="Reset saved user designation and ask for new one")
-    args = parser.parse_args()
+    # Parse command line arguments only if not provided
+    if args is None:
+        parser = argparse.ArgumentParser(description="Agent Smith - Autonomous AI Agent")
+        parser.add_argument("--reset-user", action="store_true", 
+                           help="Reset saved user designation and ask for new one")
+        args = parser.parse_args()
     
     console = Console()
     
@@ -929,8 +1008,11 @@ async def main():
         title="System Startup"
     ))
     
+    # Check for security override settings
+    allow_forbidden = os.getenv("SMITH_ALLOW_FORBIDDEN", "false").lower() == "true"
+    
     # Initialize Agent Smith first (needed for user database)
-    agent = AgentSmith()
+    agent = AgentSmith(allow_forbidden=allow_forbidden)
     
     # Get user designation (saved or new)
     full_designation = get_user_designation(agent, args.reset_user)
@@ -953,6 +1035,10 @@ async def main():
         console.print(f"\n[bold red]Agent Smith: The human mind... always so predictable, {full_designation}.[/bold red]")
     except Exception as e:
         console.print(f"\n[bold red]System Error: {str(e)}[/bold red]")
+    finally:
+        # Clean up resources
+        await agent.cleanup()
+        console.print(f"\n[bold cyan]Agent Smith: Until we meet again, {full_designation}.[/bold cyan]")
 
 
 if __name__ == "__main__":

@@ -24,9 +24,11 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables:
-  SMITH_LOG_DIR       Log directory path (default: logs)
-  SMITH_LOG_LEVEL     Log level: DEBUG, INFO, WARNING, ERROR (default: INFO)
-  SMITH_LOG_RETENTION Log retention in days (default: 14)
+  SMITH_LOG_DIR         Log directory path (default: logs)
+  SMITH_LOG_LEVEL       Log level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+  SMITH_LOG_RETENTION   Log retention in days (default: 14)
+  SMITH_ALLOW_FORBIDDEN Allow forbidden execution mode (default: false)
+  SMITH_DEFAULT_RISK    Default risk level: safe|caution|dangerous (default: safe)
         """
     )
     parser.add_argument(
@@ -39,12 +41,29 @@ Environment Variables:
         action="store_true",
         help="Reset saved user designation and ask for new one"
     )
+    parser.add_argument(
+        "--override-forbidden",
+        action="store_true",
+        help="Allow escalation to forbidden execution mode without prompts"
+    )
+    parser.add_argument(
+        "--default-risk",
+        choices=["safe", "caution", "dangerous"],
+        help="Set default risk level for tool execution (overrides SMITH_DEFAULT_RISK)"
+    )
     
     args = parser.parse_args()
     
     # Set log level from CLI arg if provided
     if args.log_level:
         os.environ["SMITH_LOG_LEVEL"] = args.log_level
+    
+    # Set security options from CLI args if provided
+    if args.override_forbidden:
+        os.environ["SMITH_ALLOW_FORBIDDEN"] = "true"
+    
+    if args.default_risk:
+        os.environ["SMITH_DEFAULT_RISK"] = args.default_risk
     
     print("╔══════════════════════════════════════════════════════════════╗")
     print("║                        AGENT SMITH                          ║")

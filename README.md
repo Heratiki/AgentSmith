@@ -25,9 +25,11 @@ AgentSmith is an advanced agentic terminal agent that embodies the calculated in
 - **Custom Tool Creation**: Uses AI to generate specialized tools for specific tasks
 
 ### Safety & Security
+- **Adaptive Policy Engine**: Tries safest execution mode first, escalates only when necessary
 - **Multi-Layer Sandboxing**: Executes code in isolated environments with resource limits
 - **Real-Time Threat Detection**: Monitors for dangerous patterns and malicious operations
 - **User Approval System**: Requires explicit authorization before executing risky operations
+- **Intelligent Escalation**: Prompts user before escalating to more dangerous execution modes
 - **Rate Limiting**: Prevents resource abuse and rapid-fire dangerous operations
 
 ## 🏗️ Architecture
@@ -132,9 +134,18 @@ Agent Smith: Initiating execution sequence...
 
 ### Execution Modes
 - **Safe Mode**: Read-only operations, basic Python functions
-- **Restricted Mode**: Limited file access, monitored subprocess execution
+- **Restricted Mode**: Limited file access, monitored subprocess execution (default starting mode)
 - **Isolated Mode**: Separate process with strict resource limits
-- **Forbidden Mode**: Blocked dangerous operations
+- **Forbidden Mode**: Blocked dangerous operations (requires explicit override)
+
+### Adaptive Escalation
+AgentSmith uses intelligent escalation to balance safety and functionality:
+
+1. **Start Safe**: Always begins with the safest viable execution mode for each tool
+2. **Fail Gracefully**: If execution fails, prompts user before escalating to higher risk mode
+3. **User Control**: Escalation requires explicit user approval ("yes", "skip", or "abort")
+4. **Progressive Steps**: Escalates one level at a time: RESTRICTED → ISOLATED → FORBIDDEN
+5. **Override Protection**: FORBIDDEN mode requires `--override-forbidden` flag or environment variable
 
 ### Threat Detection
 - **Pattern Recognition**: Identifies dangerous command patterns
@@ -175,6 +186,10 @@ export AGENT_SMITH_MODEL="gemma3n:latest"
 export AGENT_SMITH_SAFETY_MODE="true"
 export AGENT_SMITH_MAX_EXECUTION_TIME="300"
 
+# Security Configuration
+export SMITH_ALLOW_FORBIDDEN="false"           # Allow forbidden execution mode
+export SMITH_DEFAULT_RISK="safe"               # Default risk level: safe|caution|dangerous
+
 # Logging Configuration
 export SMITH_LOG_DIR="logs"                    # Log directory path
 export SMITH_LOG_LEVEL="INFO"                  # DEBUG, INFO, WARNING, ERROR
@@ -186,6 +201,8 @@ export SMITH_LOG_RETENTION="14"                # Log retention in days
 python run_agent.py --help                     # Show all options
 python run_agent.py --log-level DEBUG          # Override log level
 python run_agent.py --reset-user               # Reset user designation
+python run_agent.py --override-forbidden       # Allow forbidden execution mode
+python run_agent.py --default-risk dangerous   # Set default risk level
 ```
 
 ### Database Files
