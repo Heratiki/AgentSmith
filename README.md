@@ -12,10 +12,11 @@ AgentSmith is an advanced agentic terminal agent that embodies the calculated in
 - **Contextual Responses**: Uses Matrix terminology ("inevitable," "purpose," "system," "anomaly")
 
 ### Intelligence Architecture
-- **Local Ollama Integration**: Uses gemma2:latest for private, local AI processing
+- **Local Ollama Integration**: Uses gemma3n:latest for private, local AI processing
 - **Dynamic Environment Discovery**: Starts "blind" and learns capabilities through exploration
 - **Persistent Memory System**: Maintains context across sessions with episodic, semantic, and procedural memory
 - **Goal Decomposition**: Breaks down complex objectives into structured, manageable subtasks
+- **Prompt Enhancement**: Analyzes and improves user requests based on previous experience and success patterns
 
 ### Tool Evolution
 - **Dynamic Tool Registry**: Discovers and catalogs system capabilities automatically
@@ -36,6 +37,10 @@ AgentSmith/
 ├── agent_smith.py           # Main agent orchestrator
 ├── core/
 │   ├── memory_manager.py    # Persistent memory & context
+│   ├── prompt_enhancer.py   # AI-powered prompt improvement
+│   ├── learning_system.py   # Task learning and pattern analysis
+│   ├── context_manager.py   # Context limit awareness
+│   ├── execution_manager.py # Intelligent task execution
 │   └── todo_manager.py      # Task breakdown & management
 ├── tools/
 │   └── dynamic_tool_registry.py  # Tool discovery & registration
@@ -99,11 +104,19 @@ What purpose brings you to my domain today?
 
 > Create a web scraper for news articles
 
+Agent Smith: Analyzing prompt for potential improvements...
+Agent Smith: Based on past experience, I have identified opportunities for improvement.
+
+[Enhancement Options displayed with improved prompt suggestions]
+
+Select your preferred prompt [0/1/2]: 1
+
+Agent Smith: Enhancement selected. Proceeding with improved prompt.
 Agent Smith: Analyzing goal structure... Decomposition in progress.
 
 [Task Matrix displays breakdown of web scraping implementation]
 
-Agent Smith: Before I proceed with 'Create a web scraper for news articles', 
+Agent Smith: Before I proceed with 'Create a comprehensive web scraper for news articles with error handling and rate limiting', 
 I require your authorization, Mr./Ms. Human. The choice, as always, is yours.
 
 Proceed with execution? [yes/no/modify]: yes
@@ -111,6 +124,7 @@ Proceed with execution? [yes/no/modify]: yes
 Agent Smith: Initiating execution sequence...
 ✓ Completed: Set up project structure
 ✓ Completed: Install required libraries
+✓ Completed: Implement robust scraping logic
 ...
 ```
 
@@ -149,22 +163,57 @@ All security events are logged with:
 - **Associative Retrieval**: Links related memories for context
 - **Persistent Storage**: Maintains knowledge across sessions
 - **Context Awareness**: Tracks conversation state and user preferences
+- **Prompt Experience Tracking**: Stores successful prompt patterns and user preferences
+- **Continuous Learning**: Adapts communication style based on interaction outcomes
 
 ## 🔧 Configuration
 
 ### Environment Variables
 ```bash
+# Core Agent Configuration
 export AGENT_SMITH_MODEL="gemma3n:latest"
 export AGENT_SMITH_SAFETY_MODE="true"
 export AGENT_SMITH_MAX_EXECUTION_TIME="300"
+
+# Logging Configuration
+export SMITH_LOG_DIR="logs"                    # Log directory path
+export SMITH_LOG_LEVEL="INFO"                  # DEBUG, INFO, WARNING, ERROR
+export SMITH_LOG_RETENTION="14"                # Log retention in days
+```
+
+### Command Line Options
+```bash
+python run_agent.py --help                     # Show all options
+python run_agent.py --log-level DEBUG          # Override log level
+python run_agent.py --reset-user               # Reset user designation
 ```
 
 ### Database Files
 - `agent_smith.db` - Main agent state and conversation history
-- `agent_smith_memory.db` - Persistent memory storage
+- `agent_smith_memory.db` - Persistent memory storage and prompt experiences
+- `agent_smith_learnings.db` - Task learning patterns and failure analysis
 - `agent_smith_tools.db` - Tool registry and capabilities
 - `agent_smith_todos.db` - Task management and progress
 - `agent_smith_security.db` - Security incidents and monitoring
+- `agent_smith_users.db` - User preferences and designations
+
+### Log Files
+- `logs/agentsmith.log` - Main application logs (size-based rotation, 5MB per file, 5 backups)
+- `logs/security.log` - Security events and incidents (daily rotation, 14 day retention)
+- Rotated logs are automatically compressed with gzip
+
+### Log Monitoring
+```bash
+# Tail live logs with syntax highlighting
+tail -f logs/agentsmith.log | ccze -A
+
+# Monitor security events
+tail -f logs/security.log
+
+# Check log rotation status
+ls -la logs/agentsmith.log*
+ls -la logs/security.log*
+```
 
 ## 🚨 Security Considerations
 
@@ -207,6 +256,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 AgentSmith represents the evolution of AI agents - not merely reactive tools, but purposeful entities capable of understanding, planning, and executing complex objectives while maintaining the highest standards of safety and user control.
 
 The agent embodies the calculated intelligence of its namesake while serving human purposes rather than opposing them. It is designed to be powerful yet controlled, intelligent yet safe, evolving yet stable.
+
+Through continuous learning from user interactions and prompt experiences, AgentSmith becomes increasingly effective at understanding and fulfilling human intentions, adapting its communication and approach based on what has proven successful in the past.
 
 ---
 

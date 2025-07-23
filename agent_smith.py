@@ -8,6 +8,7 @@ Like the Agent Smith from The Matrix, this entity adapts, evolves, and persists.
 import argparse
 import asyncio
 import json
+import logging
 import sqlite3
 import subprocess
 import sys
@@ -26,6 +27,12 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
+# Initialize logging before other imports
+from core.logging_config import setup_logging, get_logger
+
+# Module logger
+logger = get_logger(__name__)
+
 # Import the dynamic tool registry
 from tools.dynamic_tool_registry import DynamicToolRegistry
 
@@ -33,6 +40,8 @@ from tools.dynamic_tool_registry import DynamicToolRegistry
 from core.learning_system import LearningSystem
 from core.context_manager import ContextManager
 from core.execution_manager import ExecutionManager
+from core.prompt_enhancer import PromptEnhancer
+from core.memory_manager import MemoryManager
 
 # Import security systems
 from security.sandbox import SandboxManager, SandboxConfig, ExecutionMode
@@ -42,6 +51,8 @@ class AgentState(TypedDict):
     """The state that persists across the agent's operations."""
     messages: Annotated[List[BaseMessage], add_messages]
     current_goal: Optional[str]
+    original_goal: Optional[str]  # Store original before enhancement
+    prompt_was_enhanced: bool
     subtasks: List[Dict[str, Any]]
     discovered_tools: Dict[str, Dict[str, Any]]
     environment_map: Dict[str, Any]
@@ -69,10 +80,17 @@ class AgentSmith:
     """
     
     def __init__(self, model_name: str = "gemma3n:latest", db_path: str = "agent_smith.db"):
+        # Initialize logging system first
+        setup_logging()
+        logger.info("AgentSmith initialization commenced...")
+        
         self.console = Console()
         self.model_name = model_name
         self.db_path = db_path
         self.client = ollama.Client()
+        
+        logger.debug(f"Using model: {model_name}")
+        logger.debug(f"Database path: {db_path}")
         
         # Initialize persistent storage (will be set up later)
         self.memory = None
@@ -85,6 +103,10 @@ class AgentSmith:
         self.learning_system = LearningSystem()
         self.context_manager = ContextManager()
         self.execution_manager = ExecutionManager(self.learning_system, self.context_manager)
+        
+        # Initialize memory and prompt enhancement systems
+        self.memory_manager = MemoryManager()
+        self.prompt_enhancer = PromptEnhancer(self.memory_manager, model_name)
         
         # Initialize security systems
         sandbox_config = SandboxConfig(
@@ -127,6 +149,7 @@ class AgentSmith:
         
         # Define nodes
         workflow.add_node("perceive", self._perceive_environment)
+        workflow.add_node("enhance_prompt", self._enhance_prompt)
         workflow.add_node("analyze", self._analyze_goal)
         workflow.add_node("plan", self._create_subtasks)
         workflow.add_node("execute", self._execute_action)
@@ -135,7 +158,8 @@ class AgentSmith:
         
         # Define edges
         workflow.set_entry_point("perceive")
-        workflow.add_edge("perceive", "analyze")
+        workflow.add_edge("perceive", "enhance_prompt")
+        workflow.add_edge("enhance_prompt", "analyze")
         workflow.add_edge("analyze", "plan")
         workflow.add_edge("plan", "approve")
         workflow.add_edge("approve", "execute")
@@ -147,9 +171,11 @@ class AgentSmith:
     async def _perceive_environment(self, state: AgentState) -> AgentState:
         """Discover the current environment and capabilities."""
         self._display_smith_message("Initializing environmental scan...")
+        logger.info("Beginning environment perception phase")
         
         # Discover system capabilities using the tool registry
         discovered_tools = await self.tool_registry.discover_system_capabilities()
+        logger.debug(f"Discovered {len(discovered_tools)} tools: {list(discovered_tools.keys())}")
         
         environment = {
             "platform": sys.platform,
@@ -159,8 +185,58 @@ class AgentSmith:
             "timestamp": datetime.now().isoformat()
         }
         
+        logger.debug(f"Environment mapped: platform={sys.platform}, cwd={Path.cwd()}")
+        
         state["environment_map"] = environment
         state["discovered_tools"] = {name: tool.__dict__ for name, tool in discovered_tools.items()}
+        return state
+    
+    async def _enhance_prompt(self, state: AgentState) -> AgentState:
+        """Enhance the user's prompt based on previous experience."""
+        current_goal = state.get("current_goal")
+        if not current_goal:
+            return state
+            
+        user_name = state.get("user_name", "Human")
+        
+        self._display_smith_message("Analyzing prompt for potential improvements...")
+        
+        try:
+            logger.info(f"Analyzing prompt for enhancement: {current_goal[:100]}...")
+            
+            # Attempt to enhance the prompt
+            enhanced_goal, was_enhanced = await self.prompt_enhancer.enhance_prompt_if_beneficial(
+                current_goal, user_name
+            )
+            
+            # Update state with results
+            state["original_goal"] = current_goal
+            state["current_goal"] = enhanced_goal
+            state["prompt_was_enhanced"] = was_enhanced
+            
+            if was_enhanced:
+                logger.info("Prompt enhancement applied successfully")
+                self._display_smith_message(
+                    "Prompt has been optimized based on previous experience.", 
+                    "success"
+                )
+            else:
+                logger.debug("No prompt enhancement needed")
+                self._display_smith_message(
+                    "Original prompt is already well-structured.", 
+                    "thinking"
+                )
+        
+        except Exception as e:
+            logger.error(f"Prompt enhancement failed: {str(e)}", exc_info=True)
+            self._display_smith_message(
+                f"Prompt analysis encountered an anomaly: {str(e)}. Proceeding with original.", 
+                "error"
+            )
+            # Ensure we have fallback values
+            state["original_goal"] = current_goal
+            state["prompt_was_enhanced"] = False
+            
         return state
     
     async def _analyze_goal(self, state: AgentState) -> AgentState:
@@ -240,8 +316,11 @@ class AgentSmith:
             
             subtasks = json.loads(clean_response)
             state["subtasks"] = subtasks if isinstance(subtasks, list) else []
+            logger.info(f"Successfully parsed {len(state['subtasks'])} subtasks")
             self.console.print(f"[green]Successfully parsed {len(state['subtasks'])} subtasks[/green]")
         except json.JSONDecodeError as e:
+            logger.warning(f"JSON parsing failed for subtasks: {e}")
+            logger.debug(f"Raw response causing parse failure: {response[:200]}...")
             self.console.print(f"[red]JSON parsing failed: {e}[/red]")
             self.console.print(f"[yellow]Raw response: {response[:200]}...[/yellow]")
             # Create a simple default subtask
@@ -352,9 +431,14 @@ class AgentSmith:
         # Learn from the execution
         execution_results = state.get("execution_results", [])
         
+        # Calculate overall success metrics
+        success_count = 0
+        total_count = len(execution_results) if execution_results else 0
+        completion_rate = 0.0
+        
         if execution_results:
             success_count = len([r for r in execution_results if r.get("success") == True])
-            total_count = len(execution_results)
+            completion_rate = success_count / total_count
             
             if success_count == total_count:
                 self._display_smith_message("Perfect execution. The system evolves.", "success")
@@ -364,6 +448,25 @@ class AgentSmith:
                 self._display_smith_message("Execution unsuccessful. The agent adapts and learns.", "thinking")
         else:
             self._display_smith_message("No execution results to analyze. The matrix... is incomplete.", "thinking")
+        
+        # Record prompt outcome for learning
+        try:
+            original_goal = state.get("original_goal") or state.get("current_goal", "")
+            was_enhanced = state.get("prompt_was_enhanced", False)
+            overall_success = success_count == total_count and total_count > 0
+            
+            if original_goal:  # Only record if we have a goal
+                await self.prompt_enhancer.record_task_outcome(
+                    prompt=original_goal,
+                    was_enhanced=was_enhanced,
+                    success=overall_success,
+                    completion_rate=completion_rate
+                )
+                
+                self._display_smith_message("Experience recorded for future prompt optimization.", "thinking")
+        
+        except Exception as e:
+            self._display_smith_message(f"Learning system anomaly: {str(e)}", "error")
         
         return state
     
@@ -501,6 +604,9 @@ class AgentSmith:
                 
                 # Execute in sandbox with explicit mode
                 if execution_mode == ExecutionMode.FORBIDDEN:
+                    from core.logging_config import log_security_event
+                    log_security_event(f"Tool execution blocked: {tool.name} - forbidden by security policy", 
+                                       level=logging.WARNING, tool_name=tool.name, execution_mode="FORBIDDEN")
                     sandbox_result = type('Result', (), {
                         'success': False, 
                         'output': '', 
@@ -509,6 +615,9 @@ class AgentSmith:
                         'resource_usage': {}
                     })()
                 else:
+                    from core.logging_config import log_security_event
+                    log_security_event(f"Tool execution approved: {tool.name} in {execution_mode.name} mode", 
+                                       level=logging.INFO, tool_name=tool.name, execution_mode=execution_mode.name)
                     sandbox = self.sandbox_manager.get_sandbox("default")
                     if sandbox is None:
                         sandbox = self.sandbox_manager.create_sandbox("default", self.default_sandbox.config)
@@ -738,6 +847,8 @@ print(json.dumps(execution_result))
         initial_state = AgentState(
             messages=[HumanMessage(content=goal)],
             current_goal=goal,
+            original_goal=None,  # Will be set during prompt enhancement
+            prompt_was_enhanced=False,
             subtasks=[],
             discovered_tools={},
             environment_map={},
