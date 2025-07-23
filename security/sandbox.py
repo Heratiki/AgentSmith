@@ -45,8 +45,8 @@ class SandboxConfig:
     max_execution_time: float = 30.0
     max_memory_mb: int = 256
     max_cpu_percent: float = 50.0
-    allowed_modules: List[str] = None
-    forbidden_patterns: List[str] = None
+    allowed_modules: Optional[List[str]] = None
+    forbidden_patterns: Optional[List[str]] = None
     working_directory: Optional[Path] = None
     network_access: bool = False
 
@@ -175,7 +175,7 @@ class SecureSandbox:
         """Validate Python code against security patterns."""
         code_lower = code.lower()
         
-        for pattern in self.config.forbidden_patterns:
+        for pattern in self.config.forbidden_patterns or []:
             if pattern.lower() in code_lower:
                 self.console.print(f"[red]Security violation: Found forbidden pattern '{pattern}'[/red]")
                 return False
@@ -206,7 +206,7 @@ class SecureSandbox:
     async def _execute_safe_python(self, code: str) -> ExecutionResult:
         """Execute Python code with maximum safety restrictions."""
         # Create a very restricted execution environment
-        safe_globals = {
+        safe_globals: Dict[str, Any] = {
             "__builtins__": {
                 "print": print,
                 "len": len,
@@ -232,7 +232,7 @@ class SecureSandbox:
         }
         
         # Add allowed modules
-        for module_name in self.config.allowed_modules:
+        for module_name in self.config.allowed_modules or []:
             try:
                 module = __import__(module_name)
                 safe_globals[module_name] = module

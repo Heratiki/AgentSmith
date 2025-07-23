@@ -48,10 +48,10 @@ class SubTask:
     priority: TaskPriority
     estimated_effort: int  # Minutes
     actual_effort: Optional[int] = None
-    dependencies: List[str] = None
-    required_tools: List[str] = None
-    success_criteria: List[str] = None
-    created_at: float = None
+    dependencies: Optional[List[str]] = None
+    required_tools: Optional[List[str]] = None
+    success_criteria: Optional[List[str]] = None
+    created_at: Optional[float] = None
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
     progress_percentage: float = 0.0
@@ -147,7 +147,7 @@ class TodoManager:
                 )
             """)
     
-    async def break_down_goal(self, goal: str, context: Dict[str, Any] = None) -> TaskHierarchy:
+    async def break_down_goal(self, goal: str, context: Optional[Dict[str, Any]] = None) -> TaskHierarchy:
         """Use AI to break down a high-level goal into structured subtasks."""
         self.console.print("[cyan]Agent Smith: Analyzing goal structure... Decomposition in progress.[/cyan]")
         
@@ -508,7 +508,7 @@ class TodoManager:
     
     def _check_dependencies(self, task: SubTask) -> bool:
         """Check if all dependencies for a task are completed."""
-        for dep_id in task.dependencies:
+        for dep_id in task.dependencies or []:
             if dep_id in self.active_tasks:
                 dep_task = self.active_tasks[dep_id]
                 if dep_task.status != TaskStatus.COMPLETED:
@@ -620,8 +620,8 @@ class TodoManager:
         }
         
         available_tasks.sort(
-            key=lambda t: (priority_order.get(t.priority, 0), -t.created_at),
-            reverse=True
+            key=lambda t: (priority_order.get(t.priority, 0), -(t.created_at or 0.0)),
+            reverse=True,
         )
         
         return available_tasks[0]

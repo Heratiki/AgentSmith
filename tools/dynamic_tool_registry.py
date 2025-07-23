@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, cast
 from dataclasses import dataclass, asdict
 from enum import Enum
 
@@ -248,12 +248,13 @@ class DynamicToolRegistry:
         discovered = {}
         
         for name, config in fs_operations.items():
+            params = cast(Dict[str, Any], config["params"])
             tool_def = ToolDefinition(
                 name=f"fs_{name}",
-                description=config["description"],
-                parameters=config["params"],
-                implementation=config["implementation"],
-                risk_level=config["risk"],
+                description=str(config["description"]),
+                parameters=params,
+                implementation=str(config["implementation"]),
+                risk_level=RiskLevel(config["risk"]),
                 category="filesystem",
                 examples=[f"fs_{name}('/path/to/file')"],
                 dependencies=["pathlib"],
@@ -355,12 +356,13 @@ except Exception as e:
         discovered = {}
         
         for name, config in code_operations.items():
+            params = cast(Dict[str, Any], config["params"])
             tool_def = ToolDefinition(
                 name=f"code_{name}",
-                description=config["description"],
-                parameters=config["params"],
-                implementation=config["implementation"],
-                risk_level=config["risk"],
+                description=str(config["description"]),
+                parameters=params,
+                implementation=str(config["implementation"]),
+                risk_level=RiskLevel(config["risk"]),
                 category="code_modification",
                 examples=[f"code_{name}()"],
                 dependencies=["pathlib", "re"],
@@ -459,10 +461,10 @@ except Exception as e:
     
     async def _test_tool_safety(self, tool: ToolDefinition) -> Dict[str, Any]:
         """Test a tool in a safe environment."""
-        test_result = {
+        test_result: Dict[str, Any] = {
             "syntax_valid": False,
             "safe_execution": False,
-            "error": None
+            "error": None,
         }
         
         try:

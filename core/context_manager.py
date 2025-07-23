@@ -20,7 +20,7 @@ class ContextManager:
         self.max_tokens = max_tokens
         self.warning_threshold = warning_threshold
         self.current_tokens = 0
-        self.session_data = {}
+        self.session_data: Dict[str, Any] = {}
         self.console = Console()
         
     def track_tokens(self, tokens_used: int):

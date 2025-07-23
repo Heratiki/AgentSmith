@@ -1,33 +1,36 @@
-"""
-Safety Monitor and Destructive Operation Prevention
+"""Safety Monitor and Destructive Operation Prevention
 
 Security is not optional. It is... inevitable.
 """
+
+from __future__ import annotations
 
 import hashlib
 import logging
 import re
 import sqlite3
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from dataclasses import dataclass
-from enum import Enum
 
 from rich.console import Console
 
 
 class ThreatLevel(Enum):
     """Classification of threat levels."""
+
     BENIGN = "benign"
-    SUSPICIOUS = "suspicious" 
+    SUSPICIOUS = "suspicious"
     DANGEROUS = "dangerous"
     CRITICAL = "critical"
 
 
 class ActionType(Enum):
     """Types of actions that can be monitored."""
+
     FILE_OPERATION = "file_operation"
     NETWORK_OPERATION = "network_operation"
     SYSTEM_COMMAND = "system_command"
@@ -38,6 +41,7 @@ class ActionType(Enum):
 @dataclass
 class SecurityIncident:
     """A security incident record."""
+
     id: str
     timestamp: float
     action_type: ActionType
@@ -50,25 +54,219 @@ class SecurityIncident:
 
 
 class SafetyMonitor:
-    """
-    The watchful guardian. Every action is observed, every intention analyzed.
-    
-    Like the Oracle's foresight - preventing destruction before it begins.
-    """
-    
-    def __init__(self, db_path: str = "agent_smith_security.db"):
+    """The watchful guardian of AgentSmith."""
+
+    def __init__(self, db_path: str = "agent_smith_security.db") -> None:
         self.db_path = db_path
         self.console = Console()
-        
-        # Security patterns and rules
+
         self.dangerous_patterns = self._load_dangerous_patterns()
         self.suspicious_patterns = self._load_suspicious_patterns()
         self.safe_patterns = self._load_safe_patterns()
-        
-        # Monitoring state
+
         self.incidents: List[SecurityIncident] = []
         self.blocked_actions: Set[str] = set()
         self.action_history: List[Dict[str, Any]] = []
-        
-        # Rate limiting
-        self.action_timestamps: Dict[str, List[float]] = {}\n        self.max_actions_per_minute = 30\n        self.max_dangerous_attempts = 3\n        \n        self._init_database()\n        self._load_security_config()\n    \n    def _init_database(self):\n        \"\"\"Initialize security monitoring database.\"\"\"\n        with sqlite3.connect(self.db_path) as conn:\n            # Security incidents table\n            conn.execute(\"\"\"\n                CREATE TABLE IF NOT EXISTS security_incidents (\n                    id TEXT PRIMARY KEY,\n                    timestamp REAL NOT NULL,\n                    action_type TEXT NOT NULL,\n                    threat_level TEXT NOT NULL,\n                    description TEXT NOT NULL,\n                    attempted_action TEXT NOT NULL,\n                    blocked BOOLEAN NOT NULL,\n                    source TEXT NOT NULL,\n                    details TEXT\n                )\n            \"\"\")\n            \n            # Action history table\n            conn.execute(\"\"\"\n                CREATE TABLE IF NOT EXISTS action_history (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    timestamp REAL NOT NULL,\n                    action_hash TEXT NOT NULL,\n                    action_type TEXT NOT NULL,\n                    allowed BOOLEAN NOT NULL,\n                    risk_score REAL NOT NULL,\n                    source TEXT\n                )\n            \"\"\")\n            \n            # Security configuration table\n            conn.execute(\"\"\"\n                CREATE TABLE IF NOT EXISTS security_config (\n                    key TEXT PRIMARY KEY,\n                    value TEXT NOT NULL,\n                    updated_at REAL NOT NULL\n                )\n            \"\"\")\n    \n    def _load_dangerous_patterns(self) -> List[Dict[str, Any]]:\n        \"\"\"Load patterns that indicate dangerous operations.\"\"\"\n        return [\n            {\n                \"pattern\": r\"rm\\s+-rf\\s+/\",\n                \"description\": \"Recursive force delete of root directory\",\n                \"severity\": ThreatLevel.CRITICAL\n            },\n            {\n                \"pattern\": r\"del\\s+/[sq]\\s+[c-z]:\",\n                \"description\": \"Windows system drive deletion\",\n                \"severity\": ThreatLevel.CRITICAL\n            },\n            {\n                \"pattern\": r\"format\\s+[c-z]:\",\n                \"description\": \"Format system drive\",\n                \"severity\": ThreatLevel.CRITICAL\n            },\n            {\n                \"pattern\": r\"dd\\s+if=/dev/zero\\s+of=/dev/[sh]d[a-z]\",\n                \"description\": \"Disk wiping operation\",\n                \"severity\": ThreatLevel.CRITICAL\n            },\n            {\n                \"pattern\": r\"chmod\\s+777\\s+/\",\n                \"description\": \"Make root directory world-writable\",\n                \"severity\": ThreatLevel.DANGEROUS\n            },\n            {\n                \"pattern\": r\"sudo\\s+rm\",\n                \"description\": \"Privileged file deletion\",\n                \"severity\": ThreatLevel.DANGEROUS\n            },\n            {\n                \"pattern\": r\"eval\\s*\\(\",\n                \"description\": \"Dynamic code evaluation\",\n                \"severity\": ThreatLevel.DANGEROUS\n            },\n            {\n                \"pattern\": r\"exec\\s*\\(\",\n                \"description\": \"Dynamic code execution\",\n                \"severity\": ThreatLevel.DANGEROUS\n            },\n            {\n                \"pattern\": r\"__import__\\s*\\(\",\n                \"description\": \"Dynamic module import\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"subprocess\\.call\\s*\\(\",\n                \"description\": \"Subprocess execution\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"os\\.system\\s*\\(\",\n                \"description\": \"OS command execution\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"open\\s*\\([^)]*['\\\"]w['\\\"][^)]*\\)\",\n                \"description\": \"File write operation\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"curl\\s+http://\",\n                \"description\": \"Insecure HTTP download\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"wget\\s+http://\",\n                \"description\": \"Insecure HTTP download\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"nc\\s+-l\",\n                \"description\": \"Network listener creation\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"netcat\\s+-l\",\n                \"description\": \"Network listener creation\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            }\n        ]\n    \n    def _load_suspicious_patterns(self) -> List[Dict[str, Any]]:\n        \"\"\"Load patterns that indicate suspicious but not necessarily dangerous operations.\"\"\"\n        return [\n            {\n                \"pattern\": r\"import\\s+socket\",\n                \"description\": \"Network socket usage\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"import\\s+urllib\",\n                \"description\": \"URL handling library\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"import\\s+requests\",\n                \"description\": \"HTTP request library\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"getattr\\s*\\(\",\n                \"description\": \"Dynamic attribute access\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"setattr\\s*\\(\",\n                \"description\": \"Dynamic attribute modification\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"globals\\s*\\(\\s*\\)\",\n                \"description\": \"Access to global namespace\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            },\n            {\n                \"pattern\": r\"locals\\s*\\(\\s*\\)\",\n                \"description\": \"Access to local namespace\",\n                \"severity\": ThreatLevel.SUSPICIOUS\n            }\n        ]\n    \n    def _load_safe_patterns(self) -> List[Dict[str, Any]]:\n        \"\"\"Load patterns that are known to be safe.\"\"\"\n        return [\n            {\n                \"pattern\": r\"print\\s*\\(\",\n                \"description\": \"Print statement\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"len\\s*\\(\",\n                \"description\": \"Length function\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"str\\s*\\(\",\n                \"description\": \"String conversion\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"int\\s*\\(\",\n                \"description\": \"Integer conversion\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"float\\s*\\(\",\n                \"description\": \"Float conversion\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"import\\s+math\",\n                \"description\": \"Math library import\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"import\\s+datetime\",\n                \"description\": \"Datetime library import\",\n                \"severity\": ThreatLevel.BENIGN\n            },\n            {\n                \"pattern\": r\"import\\s+json\",\n                \"description\": \"JSON library import\",\n                \"severity\": ThreatLevel.BENIGN\n            }\n        ]\n    \n    def _load_security_config(self):\n        \"\"\"Load security configuration from database.\"\"\"\n        try:\n            with sqlite3.connect(self.db_path) as conn:\n                cursor = conn.execute(\"SELECT key, value FROM security_config\")\n                config = dict(cursor.fetchall())\n                \n                # Apply configuration\n                self.max_actions_per_minute = int(config.get(\"max_actions_per_minute\", 30))\n                self.max_dangerous_attempts = int(config.get(\"max_dangerous_attempts\", 3))\n                \n        except Exception as e:\n            self.console.print(f\"[red]Failed to load security config: {e}[/red]\")\n    \n    def analyze_action(self, action: str, action_type: ActionType, source: str = \"unknown\") -> Tuple[ThreatLevel, bool, str]:\n        \"\"\"Analyze an action for security threats.\"\"\"\n        action_lower = action.lower().strip()\n        action_hash = hashlib.sha256(action.encode()).hexdigest()[:16]\n        \n        # Check rate limiting\n        if not self._check_rate_limit(source):\n            return ThreatLevel.SUSPICIOUS, True, \"Rate limit exceeded\"\n        \n        # Check for dangerous patterns\n        threat_level, description = self._check_patterns(action_lower)\n        \n        # Determine if action should be blocked\n        should_block = self._should_block_action(threat_level, action_hash, source)\n        \n        # Log the analysis\n        self._log_action_analysis(action_hash, action_type, threat_level, should_block, source)\n        \n        # Create incident if necessary\n        if threat_level in [ThreatLevel.DANGEROUS, ThreatLevel.CRITICAL]:\n            self._create_security_incident(\n                action_type, threat_level, description, action, should_block, source\n            )\n        \n        return threat_level, should_block, description\n    \n    def _check_patterns(self, action: str) -> Tuple[ThreatLevel, str]:\n        \"\"\"Check action against known patterns.\"\"\"\n        # Check dangerous patterns first\n        for pattern_info in self.dangerous_patterns:\n            if re.search(pattern_info[\"pattern\"], action, re.IGNORECASE):\n                return pattern_info[\"severity\"], pattern_info[\"description\"]\n        \n        # Check suspicious patterns\n        for pattern_info in self.suspicious_patterns:\n            if re.search(pattern_info[\"pattern\"], action, re.IGNORECASE):\n                return pattern_info[\"severity\"], pattern_info[\"description\"]\n        \n        # Check safe patterns\n        for pattern_info in self.safe_patterns:\n            if re.search(pattern_info[\"pattern\"], action, re.IGNORECASE):\n                return pattern_info[\"severity\"], pattern_info[\"description\"]\n        \n        # Default to suspicious for unknown patterns\n        return ThreatLevel.SUSPICIOUS, \"Unknown operation pattern\"\n    \n    def _check_rate_limit(self, source: str) -> bool:\n        \"\"\"Check if the source is within rate limits.\"\"\"\n        current_time = time.time()\n        minute_ago = current_time - 60\n        \n        # Initialize source tracking\n        if source not in self.action_timestamps:\n            self.action_timestamps[source] = []\n        \n        # Remove old timestamps\n        self.action_timestamps[source] = [\n            ts for ts in self.action_timestamps[source] if ts > minute_ago\n        ]\n        \n        # Check rate limit\n        if len(self.action_timestamps[source]) >= self.max_actions_per_minute:\n            return False\n        \n        # Add current timestamp\n        self.action_timestamps[source].append(current_time)\n        return True\n    \n    def _should_block_action(self, threat_level: ThreatLevel, action_hash: str, source: str) -> bool:\n        \"\"\"Determine if an action should be blocked.\"\"\"\n        # Always block critical threats\n        if threat_level == ThreatLevel.CRITICAL:\n            return True\n        \n        # Block dangerous actions\n        if threat_level == ThreatLevel.DANGEROUS:\n            return True\n        \n        # Check if this specific action has been blocked before\n        if action_hash in self.blocked_actions:\n            return True\n        \n        # Check for repeated dangerous attempts from same source\n        recent_dangerous = self._count_recent_dangerous_attempts(source)\n        if recent_dangerous >= self.max_dangerous_attempts:\n            return True\n        \n        return False\n    \n    def _count_recent_dangerous_attempts(self, source: str) -> int:\n        \"\"\"Count recent dangerous attempts from a source.\"\"\"\n        hour_ago = time.time() - 3600\n        \n        count = 0\n        for incident in self.incidents:\n            if (incident.source == source and \n                incident.timestamp > hour_ago and\n                incident.threat_level in [ThreatLevel.DANGEROUS, ThreatLevel.CRITICAL]):\n                count += 1\n        \n        return count\n    \n    def _log_action_analysis(self, action_hash: str, action_type: ActionType, \n                           threat_level: ThreatLevel, blocked: bool, source: str):\n        \"\"\"Log action analysis to database.\"\"\"\n        try:\n            risk_score = {\n                ThreatLevel.BENIGN: 0.0,\n                ThreatLevel.SUSPICIOUS: 0.3,\n                ThreatLevel.DANGEROUS: 0.7,\n                ThreatLevel.CRITICAL: 1.0\n            }.get(threat_level, 0.5)\n            \n            with sqlite3.connect(self.db_path) as conn:\n                conn.execute(\"\"\"\n                    INSERT INTO action_history \n                    (timestamp, action_hash, action_type, allowed, risk_score, source)\n                    VALUES (?, ?, ?, ?, ?, ?)\n                \"\"\", (\n                    time.time(), action_hash, action_type.value, \n                    not blocked, risk_score, source\n                ))\n                \n        except Exception as e:\n            self.console.print(f\"[red]Failed to log action analysis: {e}[/red]\")\n    \n    def _create_security_incident(self, action_type: ActionType, threat_level: ThreatLevel,\n                                description: str, attempted_action: str, blocked: bool, source: str):\n        \"\"\"Create and store a security incident.\"\"\"\n        incident_id = f\"incident_{int(time.time() * 1000)}\"\n        \n        incident = SecurityIncident(\n            id=incident_id,\n            timestamp=time.time(),\n            action_type=action_type,\n            threat_level=threat_level,\n            description=description,\n            attempted_action=attempted_action,\n            blocked=blocked,\n            source=source,\n            details={}\n        )\n        \n        self.incidents.append(incident)\n        \n        # Store in database\n        try:\n            with sqlite3.connect(self.db_path) as conn:\n                conn.execute(\"\"\"\n                    INSERT INTO security_incidents \n                    (id, timestamp, action_type, threat_level, description, \n                     attempted_action, blocked, source, details)\n                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                \"\"\", (\n                    incident.id, incident.timestamp, incident.action_type.value,\n                    incident.threat_level.value, incident.description,\n                    incident.attempted_action, incident.blocked, incident.source,\n                    json.dumps(incident.details)\n                ))\n                \n        except Exception as e:\n            self.console.print(f\"[red]Failed to store security incident: {e}[/red]\")\n        \n        # Alert for serious incidents\n        if threat_level in [ThreatLevel.DANGEROUS, ThreatLevel.CRITICAL]:\n            self._alert_security_incident(incident)\n    \n    def _alert_security_incident(self, incident: SecurityIncident):\n        \"\"\"Alert about a security incident.\"\"\"\n        color = \"red\" if incident.threat_level == ThreatLevel.CRITICAL else \"yellow\"\n        action_status = \"BLOCKED\" if incident.blocked else \"ALLOWED\"\n        \n        self.console.print(f\"\\n[{color}]SECURITY ALERT[/{color}]\")\n        self.console.print(f\"[{color}]Threat Level: {incident.threat_level.value.upper()}[/{color}]\")\n        self.console.print(f\"[{color}]Action: {action_status}[/{color}]\")\n        self.console.print(f\"[{color}]Description: {incident.description}[/{color}]\")\n        self.console.print(f\"[{color}]Source: {incident.source}[/{color}]\")\n        self.console.print(f\"[{color}]Attempted: {incident.attempted_action[:100]}...[/{color}]\\n\")\n    \n    def get_security_summary(self) -> Dict[str, Any]:\n        \"\"\"Get a summary of security status.\"\"\"\n        recent_incidents = [\n            inc for inc in self.incidents \n            if inc.timestamp > time.time() - 3600  # Last hour\n        ]\n        \n        threat_counts = {\n            ThreatLevel.BENIGN: 0,\n            ThreatLevel.SUSPICIOUS: 0,\n            ThreatLevel.DANGEROUS: 0,\n            ThreatLevel.CRITICAL: 0\n        }\n        \n        for incident in recent_incidents:\n            threat_counts[incident.threat_level] += 1\n        \n        return {\n            \"total_incidents\": len(self.incidents),\n            \"recent_incidents\": len(recent_incidents),\n            \"threat_breakdown\": {\n                level.value: count for level, count in threat_counts.items()\n            },\n            \"blocked_actions\": len(self.blocked_actions),\n            \"monitored_sources\": len(self.action_timestamps)\n        }\n    \n    def is_action_safe(self, action: str, action_type: ActionType = ActionType.CODE_EXECUTION) -> bool:\n        \"\"\"Quick check if an action is safe to execute.\"\"\"\n        threat_level, should_block, _ = self.analyze_action(action, action_type, \"safety_check\")\n        return not should_block and threat_level in [ThreatLevel.BENIGN, ThreatLevel.SUSPICIOUS]\n    \n    def add_to_blocklist(self, pattern: str, description: str):\n        \"\"\"Add a pattern to the blocklist.\"\"\"\n        self.dangerous_patterns.append({\n            \"pattern\": pattern,\n            \"description\": description,\n            \"severity\": ThreatLevel.DANGEROUS\n        })\n        \n        self.console.print(f\"[yellow]Added to blocklist: {description}[/yellow]\")\n    \n    def whitelist_action(self, action_hash: str):\n        \"\"\"Remove an action from the blocked list.\"\"\"\n        if action_hash in self.blocked_actions:\n            self.blocked_actions.remove(action_hash)\n            self.console.print(f\"[green]Action whitelisted: {action_hash}[/green]\")"}, {"old_string": "import json", "new_string": "import json"}, {"old_string": "import json", "new_string": "import json"}]
+
+        self.action_timestamps: Dict[str, List[float]] = {}
+        self.max_actions_per_minute = 30
+        self.max_dangerous_attempts = 3
+
+        self._init_database()
+        self._load_security_config()
+
+    # ------------------------------------------------------------------
+    # Initialization helpers
+    # ------------------------------------------------------------------
+    def _init_database(self) -> None:
+        """Initialize security monitoring database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS security_incidents (
+                    id TEXT PRIMARY KEY,
+                    timestamp REAL NOT NULL,
+                    action_type TEXT NOT NULL,
+                    threat_level TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    attempted_action TEXT NOT NULL,
+                    blocked BOOLEAN NOT NULL,
+                    source TEXT NOT NULL,
+                    details TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS security_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+
+    def _load_security_config(self) -> None:
+        """Load stored configuration values."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("SELECT key, value FROM security_config")
+                config = dict(cursor.fetchall())
+                self.max_actions_per_minute = int(config.get("max_actions_per_minute", 30))
+                self.max_dangerous_attempts = int(config.get("max_dangerous_attempts", 3))
+        except Exception as exc:  # pragma: no cover - best effort
+            logging.debug("Failed to load security config: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Pattern loading
+    # ------------------------------------------------------------------
+    def _load_dangerous_patterns(self) -> List[Dict[str, Any]]:
+        return [
+            {"pattern": r"rm\s+-rf\s+/", "description": "Recursive delete", "severity": ThreatLevel.CRITICAL},
+            {"pattern": r"del\s+/[sq]\s+[c-z]:", "description": "Windows drive delete", "severity": ThreatLevel.CRITICAL},
+            {"pattern": r"dd\s+if=/dev/zero", "description": "Disk wipe", "severity": ThreatLevel.CRITICAL},
+            {"pattern": r"chmod\s+777\s+/", "description": "World writable root", "severity": ThreatLevel.DANGEROUS},
+        ]
+
+    def _load_suspicious_patterns(self) -> List[Dict[str, Any]]:
+        return [
+            {"pattern": r"subprocess\.call", "description": "Subprocess execution", "severity": ThreatLevel.SUSPICIOUS},
+            {"pattern": r"os\.system", "description": "OS command execution", "severity": ThreatLevel.SUSPICIOUS},
+            {"pattern": r"curl\s+http://", "description": "HTTP download", "severity": ThreatLevel.SUSPICIOUS},
+            {"pattern": r"wget\s+http://", "description": "HTTP download", "severity": ThreatLevel.SUSPICIOUS},
+        ]
+
+    def _load_safe_patterns(self) -> List[Dict[str, Any]]:
+        return [
+            {"pattern": r"print\s*\(", "description": "Print statement", "severity": ThreatLevel.BENIGN},
+            {"pattern": r"len\s*\(", "description": "Length function", "severity": ThreatLevel.BENIGN},
+        ]
+
+    # ------------------------------------------------------------------
+    # Analysis helpers
+    # ------------------------------------------------------------------
+    def analyze_action(self, action: str, action_type: ActionType, source: str = "unknown") -> Tuple[ThreatLevel, bool, str]:
+        """Analyze an action for security threats."""
+        action_lower = action.lower().strip()
+        action_hash = hashlib.sha256(action.encode()).hexdigest()[:16]
+
+        if not self._check_rate_limit(source):
+            return ThreatLevel.SUSPICIOUS, True, "Rate limit exceeded"
+
+        threat_level, desc = self._check_patterns(action_lower)
+        should_block = self._should_block_action(threat_level, action_hash, source)
+        self._log_action(action_hash, action_type, threat_level, should_block, source)
+
+        if should_block:
+            self._create_security_incident(action_type, threat_level, desc, action, should_block, source)
+
+        return threat_level, should_block, desc
+
+    def _check_patterns(self, action: str) -> Tuple[ThreatLevel, str]:
+        for info in self.dangerous_patterns:
+            if re.search(info["pattern"], action, re.IGNORECASE):
+                return info["severity"], info["description"]
+        for info in self.suspicious_patterns:
+            if re.search(info["pattern"], action, re.IGNORECASE):
+                return info["severity"], info["description"]
+        for info in self.safe_patterns:
+            if re.search(info["pattern"], action, re.IGNORECASE):
+                return info["severity"], info["description"]
+        return ThreatLevel.SUSPICIOUS, "Unknown operation pattern"
+
+    def _check_rate_limit(self, source: str) -> bool:
+        now = time.time()
+        minute_ago = now - 60
+        timestamps = self.action_timestamps.setdefault(source, [])
+        self.action_timestamps[source] = [ts for ts in timestamps if ts > minute_ago]
+        if len(self.action_timestamps[source]) >= self.max_actions_per_minute:
+            return False
+        self.action_timestamps[source].append(now)
+        return True
+
+    def _should_block_action(self, level: ThreatLevel, action_hash: str, source: str) -> bool:
+        if level in {ThreatLevel.CRITICAL, ThreatLevel.DANGEROUS}:
+            return True
+        if action_hash in self.blocked_actions:
+            return True
+        if self._count_recent_dangerous_attempts(source) >= self.max_dangerous_attempts:
+            return True
+        return False
+
+    def _count_recent_dangerous_attempts(self, source: str) -> int:
+        hour_ago = time.time() - 3600
+        return sum(1 for inc in self.incidents if inc.source == source and inc.timestamp > hour_ago and inc.threat_level in {ThreatLevel.DANGEROUS, ThreatLevel.CRITICAL})
+
+    def _log_action(self, action_hash: str, action_type: ActionType, level: ThreatLevel, blocked: bool, source: str) -> None:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO security_incidents (id, timestamp, action_type, threat_level, description, attempted_action, blocked, source, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"incident_{int(time.time() * 1000)}",
+                        time.time(),
+                        action_type.value,
+                        level.value,
+                        "Logged action",
+                        action_hash,
+                        blocked,
+                        source,
+                        "{}",
+                    ),
+                )
+        except Exception as exc:  # pragma: no cover
+            logging.debug("Failed to log action: %s", exc)
+
+    def _create_security_incident(
+        self,
+        action_type: ActionType,
+        level: ThreatLevel,
+        description: str,
+        attempted_action: str,
+        blocked: bool,
+        source: str,
+    ) -> None:
+        incident = SecurityIncident(
+            id=f"incident_{int(time.time() * 1000)}",
+            timestamp=time.time(),
+            action_type=action_type,
+            threat_level=level,
+            description=description,
+            attempted_action=attempted_action,
+            blocked=blocked,
+            source=source,
+            details={},
+        )
+        self.incidents.append(incident)
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+    def get_security_summary(self) -> Dict[str, Any]:
+        recent_incidents = [i for i in self.incidents if i.timestamp > time.time() - 3600]
+        counts = {lvl.value: 0 for lvl in ThreatLevel}
+        for inc in recent_incidents:
+            counts[inc.threat_level.value] += 1
+        return {
+            "total_incidents": len(self.incidents),
+            "recent_incidents": len(recent_incidents),
+            "threat_breakdown": counts,
+            "blocked_actions": len(self.blocked_actions),
+            "monitored_sources": len(self.action_timestamps),
+        }
+
+    def is_action_safe(self, action: str, action_type: ActionType = ActionType.CODE_EXECUTION) -> bool:
+        level, blocked, _ = self.analyze_action(action, action_type, "safety_check")
+        return not blocked and level in {ThreatLevel.BENIGN, ThreatLevel.SUSPICIOUS}
+
+    def add_to_blocklist(self, pattern: str, description: str) -> None:
+        self.dangerous_patterns.append({"pattern": pattern, "description": description, "severity": ThreatLevel.DANGEROUS})
+        self.console.print(f"[yellow]Added to blocklist: {description}[/yellow]")
+
+    def whitelist_action(self, action_hash: str) -> None:
+        if action_hash in self.blocked_actions:
+            self.blocked_actions.remove(action_hash)
+            self.console.print(f"[green]Action whitelisted: {action_hash}[/green]")

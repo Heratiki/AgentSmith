@@ -166,8 +166,8 @@ class MemoryManager:
                     content: str, 
                     memory_type: MemoryType,
                     importance: float = 0.5,
-                    tags: List[str] = None,
-                    metadata: Dict[str, Any] = None) -> str:
+                    tags: Optional[List[str]] = None,
+                    metadata: Optional[Dict[str, Any]] = None) -> str:
         """Store a new memory."""
         memory_id = f"{memory_type.value}_{int(time.time() * 1000)}"
         current_time = time.time()
@@ -223,7 +223,7 @@ class MemoryManager:
         try:
             # Build SQL query
             conditions = ["content LIKE ? OR tags LIKE ?"]
-            params = [f"%{query}%", f"%{query}%"]
+            params: List[Any] = [f"%{query}%", f"%{query}%"]
             
             if memory_type:
                 conditions.append("type = ?")

@@ -48,6 +48,8 @@ class AgentState(TypedDict):
     user_name: Optional[str]
     safety_mode: bool
     execution_results: List[Dict[str, Any]]
+    goal_analysis: Optional[Dict[str, Any]]
+    user_approval: Optional[str]
 
 
 class Tool(BaseModel):
@@ -308,8 +310,9 @@ class AgentSmith:
         
         # Use intelligent execution manager for the overall goal instead of individual subtasks
         try:
+            goal_text = state.get('current_goal') or ""
             result = await self.execution_manager.execute_task_with_intelligence(
-                state['current_goal'], self.tool_registry, self
+                goal_text, self.tool_registry, self
             )
             
             # Convert to list format expected by reflection phase
@@ -507,6 +510,8 @@ class AgentSmith:
                     })()
                 else:
                     sandbox = self.sandbox_manager.get_sandbox("default")
+                    if sandbox is None:
+                        sandbox = self.sandbox_manager.create_sandbox("default", self.default_sandbox.config)
                     sandbox_result = await sandbox.execute_python_code(safe_code, execution_mode)
                 
                 # Get feedback on what actually happened  
@@ -738,11 +743,14 @@ print(json.dumps(execution_result))
             environment_map={},
             user_name=user_name,
             safety_mode=True,
-            execution_results=[]
+            execution_results=[],
+            goal_analysis=None,
+            user_approval=None,
         )
         
         # Execute the graph
         config = {"configurable": {"thread_id": "agent_smith_session"}}
+        assert self.graph is not None
         final_state = await self.graph.ainvoke(initial_state, config)
         
         return final_state
