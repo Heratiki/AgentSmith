@@ -69,20 +69,28 @@ AgentSmith/
    cd AgentSmith
    ```
 
-2. **Install Dependencies**
+2. **Create & Activate Virtual Environment**
    ```bash
-   pip install -r requirements.txt
+   python3.12 -m venv .venv
+   source .venv/bin/activate
    ```
 
-3. **Install Ollama & Model**
+3. **Install Dependencies**
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install -r requirements-dev.txt
+   ```
+
+4. **Install Ollama & Model**
    ```bash
    # Install Ollama (visit https://ollama.ai/ for instructions)
    ollama pull gemma3n:latest
    ```
 
-4. **Verify Installation**
+5. **Verify Installation**
    ```bash
    python -c "import ollama; print('Ollama client ready')"
+   python -m pytest --version
    ```
 
 ## 🎮 Usage
@@ -90,6 +98,11 @@ AgentSmith/
 ### Basic Operation
 ```bash
 python run_agent.py
+```
+
+### Run Tests
+```bash
+python -m pytest -q
 ```
 
 ### Interactive Commands
